@@ -34,6 +34,16 @@ raw_frame = glue_context.create_dynamic_frame_from_catalog(
 )
 raw_df = raw_frame.toDF()
 
+if "ticker_symbol" not in raw_df.columns:
+    if "ticker" in raw_df.columns:
+        raw_df = raw_df.withColumnRenamed("ticker", "ticker_symbol")
+    else:
+        available = ", ".join(raw_df.columns)
+        raise ValueError(f"Ticker column not found in raw dataset. Available columns: {available}")
+
+if "trade_date" not in raw_df.columns:
+    raise ValueError("trade_date column not found in raw dataset")
+
 window_spec = Window.partitionBy("ticker_symbol").orderBy("trade_date")
 rolling_window = window_spec.rowsBetween(-4, 0)
 
