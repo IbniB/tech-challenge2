@@ -70,6 +70,14 @@ def resolve_dates(start: Optional[str], end: Optional[str]) -> tuple[dt.date, dt
     return start_date, end_date
 
 
+def flatten_columns(data: pd.DataFrame) -> pd.DataFrame:
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = ["_".join(filter(None, map(str, col))) for col in data.columns]
+    else:
+        data.columns = [str(col) for col in data.columns]
+    return data
+
+
 def download_ticker_history(ticker: str, start: dt.date, end: dt.date) -> pd.DataFrame:
     LOGGER.info("Baixando dados de %s de %s ate %s", ticker, start, end)
     data = yf.download(
@@ -84,23 +92,32 @@ def download_ticker_history(ticker: str, start: dt.date, end: dt.date) -> pd.Dat
         LOGGER.warning("Ticker %s retornou dataframe vazio", ticker)
         return pd.DataFrame()
 
+    data = flatten_columns(data)
     data.reset_index(inplace=True)
+
+    if "Date" not in data.columns:
+        LOGGER.warning("Ticker %s nao trouxe coluna Date; pulando", ticker)
+        LOGGER.debug("Colunas recebidas: %s", data.columns.tolist())
+        return pd.DataFrame()
+
     data.rename(columns={"Date": "trade_date"}, inplace=True)
-    data.rename(columns=RENAMED_COLUMNS, inplace=True)
-    data["trade_date"] = data["trade_date"].dt.date
+    data["trade_date"] = pd.to_datetime(data["trade_date"], errors="coerce").dt.date
     data["ticker_symbol"] = ticker
 
-    missing_cols = set(EXPECTED_ORDER) - set(data.columns)
-    if missing_cols:
-        raise ValueError(f"Colunas ausentes apos renomear: {sorted(missing_cols)}")
-
-    for column in NUMERIC_COLUMNS:
-        if column == "volume":
-            data[column] = pd.to_numeric(data[column], errors="coerce").astype("Int64")
+    for original, renamed in RENAMED_COLUMNS.items():
+        match = next((col for col in data.columns if col.lower().startswith(original.lower())), None)
+        if match:
+            series = data[match]
+            if isinstance(series, pd.DataFrame):
+                series = series.iloc[:, 0]
+            if original == "Volume":
+                data[renamed] = pd.to_numeric(series, errors="coerce").fillna(0).astype("int64")
+            else:
+                data[renamed] = pd.to_numeric(series, errors="coerce")
         else:
-            data[column] = pd.to_numeric(data[column], errors="coerce")
+            data[renamed] = 0 if renamed == "volume" else pd.NA
 
-    data = data[EXPECTED_ORDER]
+    data = data.reindex(columns=EXPECTED_ORDER)
     return data.dropna(subset=["open_price", "close_price"]).reset_index(drop=True)
 
 
@@ -196,4 +213,3 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
 
 if __name__ == "__main__":
     main()
-
