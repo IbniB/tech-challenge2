@@ -25,24 +25,30 @@ job.init(args["JOB_NAME"], args)
 raw_path = args["raw_path"].rstrip("/")
 output_path = args["output_path"].rstrip("/")
 raw_database = args["catalog_database"]
-raw_table = args["raw_table"]
 refined_table = args["refined_table"]
 
-raw_frame = glue_context.create_dynamic_frame_from_catalog(
-    database=raw_database,
-    table_name=raw_table
-)
-raw_df = raw_frame.toDF()
+print(f"Reading raw parquet from {raw_path}")
+raw_df = spark.read.format("parquet").load(raw_path)
 
-if "ticker_symbol" not in raw_df.columns:
-    if "ticker" in raw_df.columns:
+if raw_df.rdd.isEmpty():
+    print(f"No records found under {raw_path}. Finishing without processing.")
+    job.commit()
+    sys.exit(0)
+
+columns = set(raw_df.columns)
+
+if "ticker_symbol" not in columns:
+    if "ticker" in columns:
         raw_df = raw_df.withColumnRenamed("ticker", "ticker_symbol")
     else:
-        available = ", ".join(raw_df.columns)
-        raise ValueError(f"Ticker column not found in raw dataset. Available columns: {available}")
+        available = ", ".join(sorted(columns))
+        raise ValueError(f"Ticker column not found. Available columns: {available}")
 
-if "trade_date" not in raw_df.columns:
-    raise ValueError("trade_date column not found in raw dataset")
+if "trade_date" not in columns:
+    available = ", ".join(sorted(columns))
+    raise ValueError(f"trade_date column not found. Available columns: {available}")
+
+raw_df = raw_df.withColumn("trade_date", F.to_date("trade_date"))
 
 window_spec = Window.partitionBy("ticker_symbol").orderBy("trade_date")
 rolling_window = window_spec.rowsBetween(-4, 0)
@@ -55,16 +61,21 @@ aggregated = (
         F.first("low_price").alias("low_price"),
         F.first("close_price").alias("closing_price"),
         F.first("adj_close_price").alias("adjusted_close"),
-        F.sum("volume").alias("volume_total"),
+        F.sum(F.col("volume")).cast("bigint").alias("volume_total"),
     )
-    .withColumn("close_ma_5", F.avg("closing_price").over(rolling_window))
-    .withColumn(
-        "close_delta",
-        F.col("closing_price") - F.lag("closing_price").over(window_spec)
-    )
-    .withColumn("dt", F.date_format("trade_date", "yyyy-MM-dd"))
-    .withColumn("ticker", F.col("ticker_symbol"))
+    .orderBy("ticker_symbol", "trade_date")
 )
+
+aggregated = aggregated.withColumn(
+    "close_ma_5",
+    F.avg("closing_price").over(rolling_window)
+)
+aggregated = aggregated.withColumn(
+    "close_delta",
+    F.col("closing_price") - F.lag("closing_price").over(window_spec)
+)
+aggregated = aggregated.withColumn("dt", F.date_format("trade_date", "yyyy-MM-dd"))
+aggregated = aggregated.withColumn("ticker", F.col("ticker_symbol"))
 
 refined_df = aggregated.select(
     "trade_date",
