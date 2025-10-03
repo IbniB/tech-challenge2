@@ -12,7 +12,14 @@ if [[ -z "${RAW_BUCKET:-}" ]]; then
 fi
 
 PROJECT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-source "${PROJECT_DIR}/.venvs/tech/bin/activate"
+VENV_ACTIVATE="${PROJECT_DIR}/.venvs/tech/bin/activate"
+if [[ -f "${VENV_ACTIVATE}" ]]; then
+  # shellcheck disable=SC1090
+  source "${VENV_ACTIVATE}"
+else
+  echo "Warning: virtualenv not found at ${VENV_ACTIVATE}. Using system Python." >&2
+fi
+
 cd "${PROJECT_DIR}"
 
 python src/ingestion/fetch_b3_data.py \

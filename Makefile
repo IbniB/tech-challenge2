@@ -1,7 +1,7 @@
 TF_DIR=infra
 TF=terraform
-SSH_KEY?=C:/Users/ibnib/Downloads/tech-key-pair2209.pem
-EC2_HOST?=ec2-user@54.162.181.131
+SSH_KEY?=~/.ssh/my-key.pem
+EC2_HOST?=ec2-user@your-ec2-host
 SYNC_PATH?=$(EC2_HOST):~/tech_challenge2
 
 .PHONY: tf-init tf-plan tf-apply tf-destroy sync-code ssh
@@ -21,7 +21,7 @@ tf-destroy:
 	cd $(TF_DIR) && $(TF) destroy
 
 sync-code:
-	scp -i "$(SSH_KEY)" -r src requirements.txt $(SYNC_PATH)/
+	scp -i "$(SSH_KEY)" -r src requirements.txt scripts glue $(SYNC_PATH)/
 
 ssh:
 	ssh -i "$(SSH_KEY)" $(EC2_HOST)
